@@ -1,72 +1,55 @@
-import { readdir, readFile } from 'fs/promises';
-import { join } from 'path';
-import { pool, query } from './db';
+// server/migrate.ts
+import { query } from "./db.js";
 
-async function runMigrations() {
-  try {
-    console.log('Starting database migrations...');
+async function main() {
+  // Minimal schema for demo; extend as needed
+  await query(`
+    create table if not exists staff_members (
+      id uuid primary key default gen_random_uuid(),
+      username text unique not null,
+      password_hash text not null,
+      role text not null default 'staff',
+      created_at timestamptz not null default now()
+    );
+  `);
 
-    // Create migrations table if it doesn't exist
-    await query(`
-      CREATE TABLE IF NOT EXISTS migrations (
-        id SERIAL PRIMARY KEY,
-        filename VARCHAR(255) UNIQUE NOT NULL,
-        executed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      )
-    `);
+  await query(`
+    create table if not exists suppliers (
+      id uuid primary key default gen_random_uuid(),
+      name text not null,
+      contact text,
+      email text unique,
+      rating numeric(2,1) default 5.0,
+      created_at timestamptz not null default now()
+    );
+  `);
 
-    // Get list of migration files
-    const migrationsDir = join(__dirname, 'migrations');
-    const files = await readdir(migrationsDir);
-    const sqlFiles = files
-      .filter(file => file.endsWith('.sql'))
-      .sort(); // Lexical order
+  await query(`
+    create table if not exists inventory_items (
+      id uuid primary key default gen_random_uuid(),
+      name text not null,
+      unit text,
+      current_stock integer not null default 0,
+      created_at timestamptz not null default now()
+    );
+  `);
 
-    console.log(`Found ${sqlFiles.length} migration files`);
+  await query(`
+    create table if not exists orders (
+      id uuid primary key default gen_random_uuid(),
+      customer_name text,
+      status text not null default 'pending',
+      total_amount numeric(10,2) not null default 0,
+      created_at timestamptz not null default now()
+    );
+  `);
 
-    // Check which migrations have already been run
-    const executedResult = await query('SELECT filename FROM migrations');
-    const executedMigrations = new Set(executedResult.rows.map(row => row.filename));
+  console.log("✅ Migration complete");
+}
 
-    // Run pending migrations
-    for (const filename of sqlFiles) {
-      if (executedMigrations.has(filename)) {
-        console.log(`Skipping already executed migration: ${filename}`);
-        continue;
-      }
-
-      console.log(`Executing migration: ${filename}`);
-      
-      try {
-        // Read and execute migration file
-        const filePath = join(migrationsDir, filename);
-        const sql = await readFile(filePath, 'utf-8');
-        
-        await query('BEGIN');
-        await query(sql);
-        await query('INSERT INTO migrations (filename) VALUES ($1)', [filename]);
-        await query('COMMIT');
-        
-        console.log(`✅ Migration completed: ${filename}`);
-      } catch (error) {
-        await query('ROLLBACK');
-        console.error(`❌ Migration failed: ${filename}`, error);
-        throw error;
-      }
-    }
-
-    console.log('All migrations completed successfully!');
-  } catch (error) {
-    console.error('Migration process failed:', error);
+main()
+  .catch((e) => {
+    console.error("Migration failed", e);
     process.exit(1);
-  } finally {
-    await pool.end();
-  }
-}
-
-// Run migrations if this file is executed directly
-if (require.main === module) {
-  runMigrations();
-}
-
-export { runMigrations };
+  })
+  .finally(() => process.exit(0));

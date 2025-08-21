@@ -1,35 +1,35 @@
-import { Router } from 'express';
-import bcrypt from 'bcryptjs';
-import { query } from '../db.js';
-import { signJwt } from '../auth.js';
+// server/routes/auth.ts
+import { Router } from "express";
+import bcrypt from "bcryptjs";
+import { query } from "../db.js";
+import { signToken } from "../auth.js";
 
 const router = Router();
 
 /**
- * Very basic auth:
- * Expects a table "staff_members(email text primary key, password_hash text, role text, active boolean)"
- * Adapt if you use username instead of email.
+ * POST /api/auth/login
+ * body: { username, password }
+ * Expect a "staff_members" table with (username text unique, password_hash text, id uuid)
  */
-router.post('/login', async (req, res) => {
-  const { email, password } = req.body as { email: string; password: string };
-  if (!email || !password) return res.status(400).json({ error: 'Missing credentials' });
+router.post("/login", async (req, res) => {
+  const { username, password } = req.body || {};
+  if (!username || !password) return res.status(400).json({ error: "username and password required" });
 
-  const result = await query<{ email: string; password_hash: string; role: string; active: boolean }>(
-    'SELECT email, password_hash, role, active FROM staff_members WHERE email=$1 LIMIT 1',
-    [email]
+  const { rows } = await query<{ id: string; password_hash: string }>(
+    `SELECT id, password_hash FROM staff_members WHERE username = $1 LIMIT 1`,
+    [username]
   );
-  const user = result.rows[0];
-  if (!user || !user.active) return res.status(401).json({ error: 'Invalid credentials' });
 
-  const ok = await bcrypt.compare(password, user.password_hash);
-  if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
+  if (!rows[0]) return res.status(401).json({ error: "Invalid credentials" });
 
-  const token = signJwt({ sub: user.email, role: user.role });
-  res.json({ access_token: token, user: { email: user.email, role: user.role } });
+  const ok = await bcrypt.compare(password, rows[0].password_hash);
+  if (!ok) return res.status(401).json({ error: "Invalid credentials" });
+
+  const token = signToken({ adminId: rows[0].id, role: "admin" });
+  res.json({ access_token: token, admin_id: rows[0].id, name: username });
 });
 
-router.get('/me', (req, res) => {
-  // Client should send Bearer token; /me is typically protected at server/index.ts via requireAuth
+router.get("/me", (req, res) => {
   res.json({ ok: true });
 });
 
