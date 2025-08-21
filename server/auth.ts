@@ -1,43 +1,26 @@
 import jwt from 'jsonwebtoken';
-import bcrypt from 'bcryptjs';
-import { Request, Response, NextFunction } from 'express';
+import type { Request, Response, NextFunction } from 'express';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key';
+const secret = process.env.JWT_SECRET || 'dev-secret-change-me';
 
-export const signJwt = (payload: any) => {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: '24h' });
-};
+export function signJwt(payload: object, expiresIn = '7d') {
+  return jwt.sign(payload, secret, { expiresIn });
+}
 
-export const verifyJwt = (token: string) => {
+export function verifyJwt<T = any>(token: string) {
+  return jwt.verify(token, secret) as T;
+}
+
+export function requireAuth(req: Request, res: Response, next: NextFunction) {
+  const auth = req.headers.authorization || '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+  if (!token) return res.status(401).json({ error: 'Unauthorized' });
+
   try {
-    return jwt.verify(token, JWT_SECRET);
-  } catch (error) {
-    return null;
+    const decoded = verifyJwt(token);
+    (req as any).user = decoded;
+    next();
+  } catch {
+    res.status(401).json({ error: 'Invalid token' });
   }
-};
-
-export const hashPassword = async (password: string) => {
-  return await bcrypt.hash(password, 10);
-};
-
-export const comparePassword = async (password: string, hash: string) => {
-  return await bcrypt.compare(password, hash);
-};
-
-export const requireAuth = (req: Request, res: Response, next: NextFunction) => {
-  const authHeader = req.headers.authorization;
-  
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ message: 'No token provided' });
-  }
-
-  const token = authHeader.substring(7);
-  const decoded = verifyJwt(token);
-
-  if (!decoded) {
-    return res.status(401).json({ message: 'Invalid token' });
-  }
-
-  (req as any).user = decoded;
-  next();
-};
+}

@@ -1,105 +1,36 @@
 import { Router } from 'express';
-import { query } from '../db';
-import { signJwt, comparePassword, requireAuth } from '../auth';
+import bcrypt from 'bcryptjs';
+import { query } from '../db.js';
+import { signJwt } from '../auth.js';
 
 const router = Router();
 
-// Login endpoint
+/**
+ * Very basic auth:
+ * Expects a table "staff_members(email text primary key, password_hash text, role text, active boolean)"
+ * Adapt if you use username instead of email.
+ */
 router.post('/login', async (req, res) => {
-  try {
-    const { email, username, password } = req.body;
+  const { email, password } = req.body as { email: string; password: string };
+  if (!email || !password) return res.status(400).json({ error: 'Missing credentials' });
 
-    if (!password) {
-      return res.status(400).json({ message: 'Password is required' });
-    }
+  const result = await query<{ email: string; password_hash: string; role: string; active: boolean }>(
+    'SELECT email, password_hash, role, active FROM staff_members WHERE email=$1 LIMIT 1',
+    [email]
+  );
+  const user = result.rows[0];
+  if (!user || !user.active) return res.status(401).json({ error: 'Invalid credentials' });
 
-    let user;
-    
-    if (email) {
-      // Login with email
-      const result = await query(
-        'SELECT * FROM users WHERE email = $1 AND active = true',
-        [email.toLowerCase()]
-      );
-      user = result.rows[0];
-    } else if (username) {
-      // Login with username
-      const result = await query(
-        'SELECT * FROM users WHERE username = $1 AND active = true',
-        [username]
-      );
-      user = result.rows[0];
-    } else {
-      return res.status(400).json({ message: 'Email or username is required' });
-    }
+  const ok = await bcrypt.compare(password, user.password_hash);
+  if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
 
-    if (!user) {
-      return res.status(401).json({ message: 'Invalid credentials' });
-    }
-
-    // Verify password
-    const isValidPassword = await comparePassword(password, user.password_hash);
-    if (!isValidPassword) {
-      return res.status(401).json({ message: 'Invalid credentials' });
-    }
-
-    // Generate JWT
-    const token = signJwt({
-      id: user.id,
-      email: user.email,
-      role: user.role
-    });
-
-    // Return user data (without password)
-    const { password_hash, ...userWithoutPassword } = user;
-    
-    res.json({
-      access_token: token,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        phone: user.phone || '',
-        joinDate: user.created_at,
-        isActive: user.active
-      }
-    });
-  } catch (error) {
-    console.error('Login error:', error);
-    res.status(500).json({ message: 'Internal server error' });
-  }
+  const token = signJwt({ sub: user.email, role: user.role });
+  res.json({ access_token: token, user: { email: user.email, role: user.role } });
 });
 
-// Get current user
-router.get('/me', requireAuth, async (req, res) => {
-  try {
-    const userId = (req as any).user.id;
-    const result = await query(
-      'SELECT id, email, name, role, phone, created_at, active FROM users WHERE id = $1',
-      [userId]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-
-    const user = result.rows[0];
-    res.json({
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        phone: user.phone || '',
-        joinDate: user.created_at,
-        isActive: user.active
-      }
-    });
-  } catch (error) {
-    console.error('Get user error:', error);
-    res.status(500).json({ message: 'Internal server error' });
-  }
+router.get('/me', (req, res) => {
+  // Client should send Bearer token; /me is typically protected at server/index.ts via requireAuth
+  res.json({ ok: true });
 });
 
 export default router;
