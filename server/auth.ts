@@ -1,13 +1,14 @@
 // server/auth.ts
-import jwt from "jsonwebtoken";
 import type { Request, Response, NextFunction } from "express";
+import jwt, { SignOptions, Secret, JwtPayload as JWTBasePayload } from "jsonwebtoken";
 
-const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
+const JWT_SECRET: Secret = process.env.JWT_SECRET || "dev-secret-change-me";
 
-export type JwtPayload = { adminId: string; role?: string };
+export type JwtPayload = JWTBasePayload & { adminId: string; role?: string };
 
-export function signToken(payload: JwtPayload, expiresIn = "7d") {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn });
+export function signToken(payload: JwtPayload, expiresIn: string | number = "7d"): string {
+  const opts: SignOptions = { expiresIn };
+  return jwt.sign(payload, JWT_SECRET, opts);
 }
 
 export function authMiddleware(req: Request, res: Response, next: NextFunction) {

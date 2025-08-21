@@ -1,5 +1,5 @@
 // server/db.ts
-import { Pool } from "pg";
+import { Pool, type QueryResult, type QueryResultRow } from "pg";
 
 const url = process.env.DATABASE_URL;
 if (!url) {
@@ -8,11 +8,12 @@ if (!url) {
 
 export const pool = new Pool({
   connectionString: url,
-  ssl: {
-    rejectUnauthorized: false
-  }
+  ssl: { rejectUnauthorized: false } // safe with Railway's proxy
 });
 
-export async function query<T = any>(text: string, params?: any[]): Promise<{ rows: T[] }> {
-  return pool.query(text, params);
+export async function query<T extends QueryResultRow = QueryResultRow>(
+  text: string,
+  params?: any[]
+): Promise<QueryResult<T>> {
+  return pool.query<T>(text, params);
 }
