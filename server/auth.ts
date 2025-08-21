@@ -1,12 +1,19 @@
 // server/auth.ts
 import type { Request, Response, NextFunction } from "express";
-import jwt, { SignOptions, Secret, JwtPayload as JWTBasePayload } from "jsonwebtoken";
+import jwt, { type SignOptions, type Secret, type JwtPayload as JWTBasePayload } from "jsonwebtoken";
 
 const JWT_SECRET: Secret = process.env.JWT_SECRET || "dev-secret-change-me";
 
+// jsonwebtoken@9 uses a narrow template string type for durations.
+// This matches values like "7d", "12h", "30m", etc.
+type DurationString = `${number}${"ms" | "s" | "m" | "h" | "d" | "w" | "y"}`;
+
 export type JwtPayload = JWTBasePayload & { adminId: string; role?: string };
 
-export function signToken(payload: JwtPayload, expiresIn: string | number = "7d"): string {
+export function signToken(
+  payload: JwtPayload,
+  expiresIn: number | DurationString = "7d"
+): string {
   const opts: SignOptions = { expiresIn };
   return jwt.sign(payload, JWT_SECRET, opts);
 }
