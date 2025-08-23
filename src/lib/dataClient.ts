@@ -1,79 +1,73 @@
-const API_MODE = (import.meta.env.VITE_API_MODE ?? 'api') as 'api' | 'supabase'
+// src/lib/dataClient.ts
+// Central client for app data (API mode). Supabase is not required in production here.
 
-/** Lazy import only when we truly need Supabase */
-async function sdb() {
-  const mod = await import('./supabaseClient')
-  return mod.DatabaseService
+import { api, setToken, clearToken, getToken } from "./api";
+
+export type Role =
+  | "admin"
+  | "kitchen"
+  | "inventory"
+  | "delivery"
+  | (string & {});
+
+export interface User {
+  id: string | number;
+  email?: string;
+  username?: string;
+  role: Role;
+  name?: string;
 }
-async function sauth() {
-  const mod = await import('./supabaseClient')
-  return {
-    authenticateWithDatabase: mod.authenticateWithDatabase,
-    authenticateWithUsername: mod.authenticateWithUsername,
+
+export interface LoginResponse {
+  token: string;
+  user: User;
+}
+
+/** Email login */
+export async function login(email: string, password: string): Promise<User> {
+  const { token, user } = await api<LoginResponse>("/auth/login", {
+    method: "POST",
+    auth: false, // login itself is public
+    body: { identifier: email, password }, // backend accepts "identifier"
+  });
+  setToken(token);
+  return user;
+}
+
+/** Username login */
+export async function loginWithUsername(
+  username: string,
+  password: string
+): Promise<User> {
+  const { token, user } = await api<LoginResponse>("/auth/login", {
+    method: "POST",
+    auth: false,
+    body: { identifier: username, password },
+  });
+  setToken(token);
+  return user;
+}
+
+/** Logout locally (invalidate token client-side) */
+export function logout() {
+  clearToken();
+}
+
+/** Simple session check – if token exists, ask backend who we are */
+export async function me(): Promise<User | null> {
+  if (!getToken()) return null;
+  try {
+    const user = await api<User>("/auth/me", { auth: true });
+    return user;
+  } catch {
+    clearToken();
+    return null;
   }
 }
 
-/* --------------------------- REST helper (API) --------------------------- */
-
-async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
-    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
-    credentials: 'include',
-    ...init,
-  })
-  if (!res.ok) {
-    let text = ''
-    try {
-      text = await res.text()
-    } catch {}
-    throw new Error(text || `Request failed: ${res.status}`)
-  }
-  // Health or empty responses may not be JSON
-  const ct = res.headers.get('content-type') || ''
-  return ct.includes('application/json') ? ((await res.json()) as T) : (undefined as T)
+/** Example protected data call */
+export async function getStaffMembers(): Promise<User[]> {
+  // Your backend route should return rows from users (or staff) table
+  const rows = await api<User[]>("/staff", { auth: true });
+  return rows;
 }
-
-/* ------------------------------- Auth API ------------------------------- */
-
-export async function login(email: string, password: string) {
-  if (API_MODE === 'supabase') {
-    const { authenticateWithDatabase } = await sauth()
-    return await authenticateWithDatabase(email, password)
-  }
-  return request('/api/auth/login', {
-    method: 'POST',
-    body: JSON.stringify({ email, password }),
-  })
-}
-
-export async function loginWithUsername(username: string, password: string) {
-  if (API_MODE === 'supabase') {
-    const { authenticateWithUsername } = await sauth()
-    return await authenticateWithUsername(username, password)
-  }
-  return request('/api/auth/login-username', {
-    method: 'POST',
-    body: JSON.stringify({ username, password }),
-  })
-}
-
-/* ------------------------------ Staff API ------------------------------- */
-
-export async function getStaffMembers() {
-  if (API_MODE === 'supabase') {
-    return await (await sdb()).getStaffMembers()
-  }
-  return request('/api/staff')
-}
-
-/* ------------------------------ Add yours ------------------------------- */
-/**
- * If you have more exports in your original dataClient (products, suppliers,
- * orders, etc.), keep them here. For each function that *sometimes* uses
- * Supabase, follow the same pattern:
- *
- *   if (API_MODE === 'supabase') {
- *     return await (await sdb()).someMethod(...)
- *   }
- *   return request('/api/whatever', { ... })
- */

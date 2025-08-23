@@ -1,39 +1,114 @@
 // server/index.ts
 import express from "express";
-import helmet from "helmet";
 import cors from "cors";
-import compression from "compression";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-
-import authRoutes from "./routes/auth.js";
-import inventoryRoutes from "./routes/inventory.js";
-import ordersRoutes from "./routes/orders.js";
-import staffRoutes from "./routes/staff.js";
-import suppliersRoutes from "./routes/suppliers.js";
+import { authMiddleware, signToken, type JwtUser } from "./auth";
+import { Pool } from "pg";
 
 const app = express();
-app.use(helmet());
+const PORT = process.env.PORT || 8080;
+
 app.use(cors());
-app.use(compression());
 app.use(express.json());
 
+// --- DB (Railway Postgres) ---
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL, // Railway variable
+  ssl: { rejectUnauthorized: false },
+});
+
+// Health (always public)
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
-app.use("/api/auth", authRoutes);
-app.use("/api/inventory", inventoryRoutes);
-app.use("/api/orders", ordersRoutes);
-app.use("/api/staff", staffRoutes);
-app.use("/api/suppliers", suppliersRoutes);
+/**
+ * PUBLIC: Login
+ * Expects: { identifier: string (email or username), password: string }
+ * Returns: { token, user }
+ *
+ * Replace the demo credential check with your own table lookup if needed.
+ */
+app.post("/api/auth/login", async (req, res) => {
+  const { identifier, password } = req.body as {
+    identifier?: string;
+    password?: string;
+  };
 
-// Serve Vite build if present
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const clientDir = path.resolve(__dirname, "../../dist");
-app.use(express.static(clientDir));
-app.get("*", (_req, res) => res.sendFile(path.join(clientDir, "index.html")));
+  if (!identifier || !password) {
+    return res.status(400).json({ error: "Missing credentials" });
+  }
 
-const port = process.env.PORT || 8080;
-app.listen(port, () => {
-  console.log(`Server listening on :${port}`);
+  try {
+    // ---- EXAMPLE lookup (adjust to your schema) ----
+    // If you already have a users table and password hashes, replace below with your validation.
+    const byEmail = identifier.includes("@");
+    const { rows } = await pool.query(
+      byEmail
+        ? `select id, email, username, role, name, password as pwd
+           from users
+           where lower(email) = lower($1) limit 1`
+        : `select id, email, username, role, name, password as pwd
+           from users
+           where lower(username) = lower($1) limit 1`,
+      [identifier]
+    );
+
+    if (rows.length === 0) {
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
+
+    const row = rows[0] as {
+      id: string | number;
+      email?: string;
+      username?: string;
+      role: string;
+      name?: string;
+      pwd?: string | null;
+    };
+
+    // ⚠️ For demo DBs that store plain text "password". If you use hashes, verify hash here.
+    // e.g. with bcrypt: await bcrypt.compare(password, row.pwd)
+    const pwdOk = !row.pwd || row.pwd === password;
+    if (!pwdOk) {
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
+
+    const user: JwtUser = {
+      id: row.id,
+      email: row.email ?? undefined,
+      username: row.username ?? undefined,
+      role: row.role,
+      name: row.name ?? undefined,
+    };
+
+    const token = signToken(user);
+    return res.json({ token, user });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "Login failed" });
+  }
+});
+
+// ---- PROTECTED ROUTES (everything below this line requires a valid token) ----
+app.use("/api", authMiddleware);
+
+// Who am I (used by frontend boot to restore session)
+app.get("/api/auth/me", (req: any, res) => {
+  return res.json(req.user);
+});
+
+// Example protected data endpoint used by the app
+app.get("/api/staff", async (_req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `select id, email, username, role, name from users order by id asc`
+    );
+    return res.json(rows);
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "Failed to fetch staff" });
+  }
+});
+
+// Start server
+app.listen(PORT, () => {
+  console.log(`Server listening on :${PORT}`);
 });

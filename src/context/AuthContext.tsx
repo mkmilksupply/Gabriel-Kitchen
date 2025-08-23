@@ -1,73 +1,106 @@
-import React, { createContext, useCallback, useContext, useMemo, useState } from 'react'
-import { login, loginWithUsername } from '../lib/dataClient'
+// src/context/AuthContext.tsx
+import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import {
+  login as apiLogin,
+  loginWithUsername as apiLoginWithUsername,
+  logout as apiLogout,
+  me as apiMe,
+  getStaffMembers as apiGetStaffMembers,
+  type User,
+} from "../lib/dataClient";
 
-type User = {
-  id: number | string
-  email?: string
-  username?: string
-  name?: string
-  role?: string
+type LoginMethod = "email" | "username";
+
+interface AuthState {
+  user: User | null;
+  role: string; // UI role picker (“Administrator”, etc.) – keep as string so your UI still works
+  setRole: (r: string) => void;
+
+  loginMethod: LoginMethod;
+  setLoginMethod: (m: LoginMethod) => void;
+
+  loading: boolean;
+  error: string | null;
+
+  login: (identifier: string, password: string) => Promise<void>;
+  logout: () => void;
+
+  // example that other screens may call
+  getStaffMembers: () => Promise<User[]>;
 }
 
-type AuthContextShape = {
-  user: User | null
-  loading: boolean
-  error: string | null
-  loginWithEmail: (email: string, password: string) => Promise<void>
-  loginWithUser: (username: string, password: string) => Promise<void>
-  logout: () => void
-}
+const AuthContext = createContext<AuthState | undefined>(undefined);
 
-const AuthContext = createContext<AuthContextShape | undefined>(undefined)
+export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) => {
+  const [user, setUser] = useState<User | null>(null);
 
-export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  // keep your UI role dropdown working – default "Administrator" like your screen
+  const [role, setRole] = useState<string>("Administrator");
+  const [loginMethod, setLoginMethod] = useState<LoginMethod>("email");
 
-  const loginWithEmail = useCallback(async (email: string, password: string) => {
-    setLoading(true)
-    setError(null)
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // bootstrap: if we have a token, ask backend who we are
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      try {
+        const u = await apiMe();
+        setUser(u);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  const login = async (identifier: string, password: string) => {
+    setError(null);
+    setLoading(true);
     try {
-      const u = await login(email, password)
-      setUser(u as User)
+      const u =
+        loginMethod === "username"
+          ? await apiLoginWithUsername(identifier, password)
+          : await apiLogin(identifier, password);
+      setUser(u);
     } catch (e: any) {
-      setError(e?.message || 'Login failed')
-      setUser(null)
+      setError(e?.message || "Login failed");
+      throw e;
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }, [])
+  };
 
-  const loginWithUser = useCallback(async (username: string, password: string) => {
-    setLoading(true)
-    setError(null)
-    try {
-      const u = await loginWithUsername(username, password)
-      setUser(u as User)
-    } catch (e: any) {
-      setError(e?.message || 'Login failed')
-      setUser(null)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  const logout = () => {
+    apiLogout();
+    setUser(null);
+  };
 
-  const logout = useCallback(() => {
-    setUser(null)
-    setError(null)
-  }, [])
+  const getStaffMembers = async () => {
+    return await apiGetStaffMembers();
+  };
 
-  const value = useMemo<AuthContextShape>(
-    () => ({ user, loading, error, loginWithEmail, loginWithUser, logout }),
-    [user, loading, error, loginWithEmail, loginWithUser, logout]
-  )
+  const value = useMemo<AuthState>(
+    () => ({
+      user,
+      role,
+      setRole,
+      loginMethod,
+      setLoginMethod,
+      loading,
+      error,
+      login,
+      logout,
+      getStaffMembers,
+    }),
+    [user, role, loginMethod, loading, error]
+  );
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
-}
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+};
 
 export function useAuth() {
-  const ctx = useContext(AuthContext)
-  if (!ctx) throw new Error('useAuth must be used within <AuthProvider>')
-  return ctx
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error("useAuth must be used within <AuthProvider>");
+  return ctx;
 }

@@ -1,34 +1,39 @@
 // server/auth.ts
 import type { Request, Response, NextFunction } from "express";
-import jwt, { type SignOptions, type Secret, type JwtPayload as JWTBasePayload } from "jsonwebtoken";
+import jwt from "jsonwebtoken";
 
-const JWT_SECRET: Secret = process.env.JWT_SECRET || "dev-secret-change-me";
+const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
 
-// jsonwebtoken@9 uses a narrow template string type for durations.
-// This matches values like "7d", "12h", "30m", etc.
-type DurationString = `${number}${"ms" | "s" | "m" | "h" | "d" | "w" | "y"}`;
-
-export type JwtPayload = JWTBasePayload & { adminId: string; role?: string };
-
-export function signToken(
-  payload: JwtPayload,
-  expiresIn: number | DurationString = "7d"
-): string {
-  const opts: SignOptions = { expiresIn };
-  return jwt.sign(payload, JWT_SECRET, opts);
+export interface JwtUser {
+  id: string | number;
+  email?: string;
+  username?: string;
+  role: string;
+  name?: string;
 }
 
-export function authMiddleware(req: Request, res: Response, next: NextFunction) {
-  const header = req.headers.authorization || "";
-  const token = header.startsWith("Bearer ") ? header.slice(7) : null;
+export function signToken(user: JwtUser): string {
+  // 12h expiry is typical — adjust as needed
+  return jwt.sign(user, JWT_SECRET, { algorithm: "HS256", expiresIn: "12h" });
+}
 
-  if (!token) return res.status(401).json({ error: "Missing token" });
+export function authMiddleware(
+  req: Request & { user?: JwtUser },
+  res: Response,
+  next: NextFunction
+) {
+  const header = req.headers.authorization || "";
+  const [, token] = header.split(" ");
+
+  if (!token) {
+    return res.status(401).json({ error: "Missing token" });
+  }
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as JwtPayload;
-    (req as any).user = decoded;
+    const payload = jwt.verify(token, JWT_SECRET) as JwtUser;
+    req.user = payload;
     next();
-  } catch {
-    res.status(401).json({ error: "Invalid token" });
+  } catch (e) {
+    return res.status(401).json({ error: "Invalid token" });
   }
 }
