@@ -1,7 +1,7 @@
 // server/index.ts
 import express from "express";
 import cors from "cors";
-import { authMiddleware, signToken, type JwtUser } from "./auth";
+import { authMiddleware, signToken, type JwtUser } from "./auth.js";
 import { Pool } from "pg";
 
 const app = express();
